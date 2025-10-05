@@ -1,5 +1,5 @@
 {
-  "name": "remote-mcp-github-oauth",
+  "name": "supabase-reservations-mcp",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -14,13 +14,9 @@
     "test:run": "vitest run"
   },
   "dependencies": {
-    "@cloudflare/workers-oauth-provider": "^0.0.5",
     "@modelcontextprotocol/sdk": "1.13.1",
     "@sentry/cloudflare": "^9.16.0",
     "agents": "^0.0.100",
-    "hono": "^4.8.3",
-    "just-pick": "^4.2.0",
-    "octokit": "^5.0.3",
     "postgres": "^3.4.5",
     "workers-mcp": "^0.0.13",
     "zod": "^3.25.67"

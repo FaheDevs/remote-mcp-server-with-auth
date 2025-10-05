@@ -1,56 +1,4 @@
 import { z } from "zod";
-import type { AuthRequest, OAuthHelpers, ClientInfo } from "@cloudflare/workers-oauth-provider";
-
-// User context passed through OAuth
-export type Props = {
-  login: string;
-  name: string;
-  email: string;
-  accessToken: string;
-};
-
-// Extended environment with OAuth provider
-export type ExtendedEnv = Env & { OAUTH_PROVIDER: OAuthHelpers };
-
-// OAuth URL construction parameters
-export interface UpstreamAuthorizeParams {
-  upstream_url: string;
-  client_id: string;
-  scope: string;
-  redirect_uri: string;
-  state?: string;
-}
-
-// OAuth token exchange parameters
-export interface UpstreamTokenParams {
-  code: string | undefined;
-  upstream_url: string;
-  client_secret: string;
-  redirect_uri: string;
-  client_id: string;
-}
-
-// Approval dialog configuration
-export interface ApprovalDialogOptions {
-  client: ClientInfo | null;
-  server: {
-    name: string;
-    logo?: string;
-    description?: string;
-  };
-  state: Record<string, any>;
-  cookieName?: string;
-  cookieSecret?: string | Uint8Array;
-  cookieDomain?: string;
-  cookiePath?: string;
-  cookieMaxAge?: number;
-}
-
-// Result of parsing approval form
-export interface ParsedApprovalResult {
-  state: any;
-  headers: Record<string, string>;
-}
 
 // MCP tool schemas for reservation management
 const mobileField = z
@@ -117,28 +65,29 @@ const updateOnlyFields = {
   notes: notesField,
 };
 
-export const UpdateReservationSchema = z
-  .object({
-    mobile: mobileField.describe(
-      "Current mobile number on the reservation you want to update."
-    ),
-    name: nameField.describe(
-      "Current guest name on the reservation you want to update."
-    ),
-    ...updateOnlyFields,
-  })
-  .refine(
-    (data) =>
-      Object.keys(updateOnlyFields).some(
-        (key) => (data as Record<string, unknown>)[key] !== undefined
-      ),
-    {
-      message: "Provide at least one field to update (new contact info, date, time, etc.).",
-      path: ["mobile"],
-    }
-  );
+const UpdateReservationBase = z.object({
+  mobile: mobileField.describe(
+    "Current mobile number on the reservation you want to update."
+  ),
+  name: nameField.describe(
+    "Current guest name on the reservation you want to update."
+  ),
+  ...updateOnlyFields,
+});
 
-export const UpdateReservationParams = UpdateReservationSchema.shape;
+export const UpdateReservationSchema = UpdateReservationBase.refine(
+  (data) =>
+    Object.keys(updateOnlyFields).some(
+      (key) => (data as Record<string, unknown>)[key] !== undefined
+    ),
+  {
+    message:
+      "Provide at least one field to update (new contact info, date, time, etc.).",
+    path: ["mobile"],
+  }
+);
+
+export const UpdateReservationParams = UpdateReservationBase.shape;
 
 export const DeleteReservationSchema = z.object({
   mobile: mobileField.describe(
@@ -209,6 +158,3 @@ export interface SqlValidationResult {
   isValid: boolean;
   error?: string;
 }
-
-// Re-export external types that are used throughout
-export type { AuthRequest, OAuthHelpers, ClientInfo };

@@ -1,29 +1,35 @@
-import OAuthProvider from "@cloudflare/workers-oauth-provider";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpAgent } from "agents/mcp";
-import { Props } from "./types";
-import { GitHubHandler } from "./auth/github-handler";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerAllTools } from "./tools/register-tools";
 
-export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
-	server = new McpServer({
-		name: "PostgreSQL Database MCP Server",
-		version: "1.0.0",
-	});
+/**
+ * Primary MCP worker entrypoint that exposes the reservation tools without
+ * any authentication layer. This keeps deployment simple while still using
+ * Durable Objects to host the MCP server.
+ */
+export class ReservationsMCP extends McpAgent<Env, Record<string, never>, Record<string, never>> {
+        server = new McpServer({
+                name: "Supabase Reservations MCP Server",
+                version: "1.0.0",
+        });
 
         async init() {
-                // Register all tools based on user permissions
-                registerAllTools(this.server, this.env, this.props);
+                registerAllTools(this.server, this.env);
         }
 }
 
-export default new OAuthProvider({
-	apiHandlers: {
-		'/sse': MyMCP.serveSSE('/sse') as any,
-		'/mcp': MyMCP.serve('/mcp') as any,
-	},
-	authorizeEndpoint: "/authorize",
-	clientRegistrationEndpoint: "/register",
-	defaultHandler: GitHubHandler as any,
-	tokenEndpoint: "/token",
-});
+export default {
+        fetch(request: Request, env: Env, ctx: ExecutionContext) {
+                const url = new URL(request.url);
+
+                if (url.pathname === "/sse" || url.pathname === "/sse/message") {
+                        return ReservationsMCP.serveSSE("/sse").fetch(request, env, ctx);
+                }
+
+                if (url.pathname === "/mcp") {
+                        return ReservationsMCP.serve("/mcp").fetch(request, env, ctx);
+                }
+
+                return new Response("Not found", { status: 404 });
+        },
+};
