@@ -1,16 +1,14 @@
-# Cloudflare Remote PostgreSQL Database MCP Server + GitHub OAuth
+# Cloudflare Supabase Reservations MCP Server + GitHub OAuth
 
-This is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/introduction) server that enables you to **chat with your PostgreSQL database**, deployable as a remote MCP server with GitHub OAuth through Cloudflare. This is production ready MCP.
+This [Model Context Protocol (MCP)](https://modelcontextprotocol.io/introduction) server lets an LLM **manage reservations stored in Supabase**. It deploys as a remote MCP server on Cloudflare Workers with GitHub OAuth so you can control who can create, update, or delete entries in your reservations table.
 
 ## Key Features
 
-- **🗄️ Database Integration with Lifespan**: Direct PostgreSQL database connection for all MCP tool calls
-- **🛠️ Modular, Single Purpose Tools**: Following best practices around MCP tools and their descriptions
-- **🔐 Role-Based Access**: GitHub username-based permissions for database write operations
-- **📊 Schema Discovery**: Automatic table and column information retrieval
-- **🛡️ SQL Injection Protection**: Built-in validation and sanitization
-- **📈 Monitoring**: Optional Sentry integration for production monitoring
-- **☁️ Cloud Native**: Powered by [Cloudflare Workers](https://developers.cloudflare.com/workers/) for global scale
+- **🔗 Supabase Integration**: Uses the Supabase REST API to read and write reservations without managing direct TCP connections.
+- **🛠️ Purpose-Built Tools**: Exposes focused MCP tools for creating, updating, and deleting reservations through Supabase.
+- **🔐 GitHub OAuth Protection**: OAuth login keeps the server private, with a no-auth variant for trusted local testing.
+- **📈 Monitoring Ready**: Optional Sentry integration wraps every tool for production observability.
+- **☁️ Cloud Native**: Runs entirely on [Cloudflare Workers](https://developers.cloudflare.com/workers/) for global scale.
 
 ## Modular Architecture
 
@@ -33,29 +31,40 @@ For new implementations, use the `/mcp` endpoint as it provides better performan
 
 ## How It Works
 
-The MCP server provides three main tools for database interaction:
+The MCP server exposes three reservation-focused tools backed by Supabase:
 
-1. **`listTables`** - Get database schema and table information (all authenticated users)
-2. **`queryDatabase`** - Execute read-only SQL queries (all authenticated users)  
-3. **`executeDatabase`** - Execute write operations like INSERT/UPDATE/DELETE (privileged users only)
+1. **`createReservation`** – Insert a new reservation row. Requires the guest's mobile number, name, number of people, date, and time (email and notes are optional).
+2. **`updateReservation`** – Locate an existing reservation by the current guest name and mobile number, then update details such as party size, time, notes, or even contact info.
+3. **`deleteReservation`** – Remove a reservation by providing the guest name and mobile number.
 
-**Authentication Flow**: Users authenticate via GitHub OAuth → Server validates permissions → Tools become available based on user's GitHub username.
+**Authentication Flow**: Users authenticate via GitHub OAuth before they can reach the server. Once connected, all three reservation tools are available. Use the no-auth entry point for trusted local workflows that do not require OAuth.
 
-**Security Model**: 
-- All authenticated GitHub users can read data
-- Only specific GitHub usernames can write/modify data
-- SQL injection protection and query validation built-in
+## Simple Examples First
 
-## Simple Example First
+### No-Auth Reservations Server (Local/Trusted Environments)
 
-Want to see a basic MCP server before diving into the full database implementation? Check out `src/simple-math.ts` - a minimal MCP server with a single `calculate` tool that performs basic math operations (add, subtract, multiply, divide). This example demonstrates the core MCP components: server setup, tool definition with Zod schemas, and dual transport support (`/mcp` and `/sse` endpoints). You can run it locally with `wrangler dev --config wrangler-simple.jsonc` and test at `http://localhost:8789/mcp`.
+If you want to experiment with the reservations tools before configuring OAuth, use the no-auth variant in `src/index-noauth.ts`. It exposes `createReservation`, `updateReservation`, and `deleteReservation` without authentication—ideal for local development or trusted environments.
+
+Run it with:
+
+```bash
+wrangler dev --config wrangler-noauth.jsonc
+```
+
+Then connect via MCP Inspector at `http://localhost:8793/mcp`.
+
+⚠️ **Security Warning**: The no-auth server allows anyone who can reach it to perform full CRUD operations on your Supabase data. Only use it on localhost or protected networks.
+
+### Minimal Math Server
+
+Want to see a basic MCP server that doesn't talk to a database? Check out `src/simple-math.ts` - a minimal MCP server with a single `calculate` tool that performs basic math operations (add, subtract, multiply, divide). This example demonstrates the core MCP components: server setup, tool definition with Zod schemas, and dual transport support (`/mcp` and `/sse` endpoints). You can run it locally with `wrangler dev --config wrangler-simple.jsonc` and test at `http://localhost:8789/mcp`.
 
 ## Prerequisites
 
 - Node.js installed on your machine
 - A Cloudflare account (free tier works)
 - A GitHub account for OAuth setup
-- A PostgreSQL database (local or hosted)
+- A Supabase project (or any PostgreSQL instance exposed through Supabase REST)
 
 ## Getting Started
 
@@ -99,8 +108,9 @@ Before running the MCP server, you need to configure several environment variabl
    GITHUB_CLIENT_SECRET=your_github_client_secret
    COOKIE_ENCRYPTION_KEY=your_random_encryption_key
 
-   # Database Connection
-   DATABASE_URL=postgresql://username:password@localhost:5432/database_name
+  # Supabase connection
+  SUPABASE_URL=https://your-project.supabase.co
+  SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 
    # Optional: Sentry monitoring
    SENTRY_DSN=https://your-sentry-dsn@sentry.io/project-id
@@ -131,28 +141,25 @@ Copy the output and paste it as `COOKIE_ENCRYPTION_KEY` in `.dev.vars`.
 
 ## Database Setup
 
-1. **Set up PostgreSQL** using a hosted service like:
-   - [Supabase](https://supabase.com/) (recommended for beginners)
-   - [Neon](https://neon.tech/)
-   - Or use local PostgreSQL/Supabase
-
-2. **Update the DATABASE_URL** in `.dev.vars` with your connection string:
+1. **Create a Supabase project** (the free tier is enough for development).
+2. **Create a `reservations` table** with the required columns. You can run this SQL in the Supabase SQL editor:
+   ```sql
+   create table if not exists reservations (
+     id bigint generated by default as identity primary key,
+     mobile text not null,
+     name text not null,
+     nb_people integer not null,
+    email text,
+     date date not null,
+     time time not null,
+     notes text,
+     inserted_at timestamp with time zone default timezone('utc', now())
+   );
    ```
-   DATABASE_URL=postgresql://username:password@host:5432/database_name
-   ```
+   Feel free to adjust defaults or add indexes as needed.
+3. **Grab your Supabase project URL and service role key** from Project Settings → API and set them as `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
 
-#### Connection String Examples:
-- **Local**: `postgresql://myuser:mypass@localhost:5432/mydb`
-- **Supabase**: `postgresql://postgres:your-password@db.your-project.supabase.co:5432/postgres`
-
-### Database Schema Setup
-
-The MCP server works with any PostgreSQL database schema. It will automatically discover:
-- All tables in the `public` schema
-- Column names, types, and constraints
-- Primary keys and indexes
-
-**Testing the Connection**: Once you have your database set up, you can test it by asking the MCP server "What tables are available in the database?" and then querying those tables to explore your data.
+Because the service role key bypasses Row Level Security, make sure you store it only in server-side secrets (Wrangler `.dev.vars`, `wrangler secret`, etc.).
 
 ## Local Development & Testing
 
@@ -179,9 +186,9 @@ Use the [MCP Inspector](https://modelcontextprotocol.io/docs/tools/inspector) to
    - Once connected, you'll see the available tools
 
 3. **Test the tools**:
-   - Use `listTables` to see your database structure
-   - Use `queryDatabase` to run SELECT queries
-   - Use `executeDatabase` (if you have write access) for INSERT/UPDATE/DELETE operations
+   - Use `createReservation` to add a new booking with the guest's mobile, name, party size, date, and time.
+   - Use `updateReservation` to adjust an existing booking by referencing the current guest name and mobile number.
+   - Use `deleteReservation` to remove a reservation that matches a specific guest name and mobile number.
 
 ## Production Deployment
 
@@ -207,7 +214,8 @@ Create a new [GitHub OAuth App](https://docs.github.com/en/apps/oauth-apps/build
 wrangler secret put GITHUB_CLIENT_ID
 wrangler secret put GITHUB_CLIENT_SECRET
 wrangler secret put COOKIE_ENCRYPTION_KEY  # use: openssl rand -hex 32
-wrangler secret put DATABASE_URL
+wrangler secret put SUPABASE_URL
+wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 wrangler secret put SENTRY_DSN  # optional (more on Sentry setup below)
 ```
 
@@ -224,78 +232,29 @@ Enter `https://mcp-github-oauth.<your-subdomain>.workers.dev/mcp` (preferred) or
 
 You now have a remote MCP server deployed! 
 
-## Database Tools & Access Control
+## Reservations Tools
 
 ### Available Tools
 
-#### 1. `listTables` (All Users)
-**Purpose**: Discover database schema and structure  
-**Access**: All authenticated GitHub users  
-**Usage**: Always run this first to understand your database structure
+- **`createReservation`** – Inserts a reservation row with the guest's mobile number, name, number of people, date, and time. Email and notes can be supplied when available.
+- **`updateReservation`** – Matches an existing reservation by the current guest name and mobile number, then updates any combination of fields (`nb_people`, `date`, `time`, `notes`, or even new contact details via `new_mobile`/`new_name`).
+- **`deleteReservation`** – Removes a reservation that matches a specific guest name and mobile number.
 
-```
-Example output:
-- Tables: users, products, orders
-- Columns: id (integer), name (varchar), created_at (timestamp)
-- Constraints and relationships
-```
+### Access Control
 
-#### 2. `queryDatabase` (All Users) 
-**Purpose**: Execute read-only SQL queries  
-**Access**: All authenticated GitHub users  
-**Restrictions**: Only SELECT statements and read operations allowed
-
-```sql
--- Examples of allowed queries:
-SELECT * FROM users WHERE created_at > '2024-01-01';
-SELECT COUNT(*) FROM products;
-SELECT u.name, o.total FROM users u JOIN orders o ON u.id = o.user_id;
-```
-
-#### 3. `executeDatabase` (Privileged Users Only)
-**Purpose**: Execute write operations (INSERT, UPDATE, DELETE, DDL)  
-**Access**: Restricted to specific GitHub usernames  
-**Capabilities**: Full database write access including schema modifications
-
-```sql
--- Examples of allowed operations:
-INSERT INTO users (name, email) VALUES ('New User', 'user@example.com');
-UPDATE products SET price = 29.99 WHERE id = 1;
-DELETE FROM orders WHERE status = 'cancelled';
-CREATE TABLE new_table (id SERIAL PRIMARY KEY, data TEXT);
-```
-
-### Access Control Configuration
-
-Database write access is controlled by GitHub username in the `ALLOWED_USERNAMES` configuration:
-
-```typescript
-// Add GitHub usernames for database write access
-const ALLOWED_USERNAMES = new Set([
-  'yourusername',    // Replace with your GitHub username
-  'teammate1',       // Add team members who need write access
-  'database-admin'   // Add other trusted users
-]);
-```
-
-**To update access permissions**:
-1. Edit `src/index.ts` and `src/index_non_sentry.ts`
-2. Update the `ALLOWED_USERNAMES` set with GitHub usernames
-3. Redeploy the worker: `wrangler deploy`
+All three tools are available once a client completes the GitHub OAuth handshake. For local experiments or trusted automation you can run the no-auth worker (`wrangler dev --config wrangler-noauth.jsonc`), which exposes the same tools without requiring OAuth.
 
 ### Typical Workflow
 
-1. **🔍 Discover**: Use `listTables` to understand database structure
-2. **📊 Query**: Use `queryDatabase` to read and analyze data  
-3. **✏️ Modify**: Use `executeDatabase` (if you have write access) to make changes
+1. **➕ Create**: `createReservation` to register new bookings as they arrive.
+2. **✏️ Adjust**: `updateReservation` to change party size, schedule, or contact info for an existing guest (supply the current name and mobile so the record can be located).
+3. **🗑️ Cleanup**: `deleteReservation` when a guest cancels or a duplicate entry slips in.
 
-### Security Features
+### Security Notes
 
-- **SQL Injection Protection**: All queries are validated before execution
-- **Operation Type Detection**: Automatic detection of read vs write operations
-- **User Context Tracking**: All operations are logged with GitHub user information
-- **Connection Pooling**: Efficient database connection management
-- **Error Sanitization**: Database errors are cleaned before being returned to users
+- The service role key grants unrestricted access—treat it like a password and only store it in secret storage.
+- Supabase row-level security rules are bypassed by the service role key; if you enable RLS, ensure policies allow the service role to perform the required actions.
+- Tool responses always include the JSON payloads returned by Supabase so you can audit changes.
 
 ### Access the remote MCP server from Claude Desktop
 
@@ -317,11 +276,11 @@ Replace the content with the following configuration. Once you restart Claude De
 }
 ```
 
-Once the Tools (under 🔨) show up in the interface, you can ask Claude to interact with your database. Example commands:
+Once the Tools (under 🔨) show up in the interface, you can ask Claude to manage reservations. Example prompts:
 
-- **"What tables are available in the database?"** → Uses `listTables` tool
-- **"Show me all users created in the last 30 days"** → Uses `queryDatabase` tool  
-- **"Add a new user named John with email john@example.com"** → Uses `executeDatabase` tool (if you have write access)
+- **"Book a table for Sam tomorrow at 19:30 for four people."** → Uses `createReservation`.
+- **"Update the reservation for Sam (mobile +15551234567) to 20:00 and add a note about allergies."** → Uses `updateReservation` with the guest name and mobile number to locate the record.
+- **"Cancel the reservation for Sam with mobile +15551234567."** → Uses `deleteReservation`.
 
 ### Using Claude and other MCP Clients
 
