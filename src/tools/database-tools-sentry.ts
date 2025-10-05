@@ -1,7 +1,6 @@
 import * as Sentry from "@sentry/cloudflare";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
-        Props,
         CreateReservationParams,
         DeleteReservationParams,
         UpdateReservationParams,
@@ -14,13 +13,13 @@ import {
 } from "../types";
 import { createReservation, deleteReservation, updateReservation } from "./reservations-service";
 
-export function registerDatabaseToolsWithSentry(server: McpServer, env: Env, props: Props) {
+export function registerDatabaseToolsWithSentry(server: McpServer, env: Env) {
         server.tool(
                 "createReservation",
                 "Create a reservation in Supabase using the guest's mobile number, name, number of people, date, time, and optional details.",
                 CreateReservationParams,
-                async (input) =>
-                        runWithSentrySpan("createReservation", props, async () => {
+                async (input: unknown) =>
+                        runWithSentrySpan("createReservation", async () => {
                                 const result = await createReservation(env, input as CreateReservationInput);
 
                                 if (!result.success) {
@@ -49,13 +48,14 @@ export function registerDatabaseToolsWithSentry(server: McpServer, env: Env, pro
                 "updateReservation",
                 "Update a reservation by matching the current guest name and mobile number, then setting new details such as time, party size, or notes.",
                 UpdateReservationParams,
-                async (input) =>
-                        runWithSentrySpan("updateReservation", props, async () => {
-                                const result = await updateReservation(env, input as UpdateReservationInput);
+                async (input: unknown) =>
+                        runWithSentrySpan("updateReservation", async () => {
+                                const typedInput = input as UpdateReservationInput;
+                                const result = await updateReservation(env, typedInput);
 
                                 if (!result.success) {
                                         return sentryErrorResponse(
-                                                `Failed to update the reservation for ${input?.name ?? "unknown guest"} (${input?.mobile ?? "unknown mobile"}): ${result.error}`,
+                                                `Failed to update the reservation for ${typedInput?.name ?? "unknown guest"} (${typedInput?.mobile ?? "unknown mobile"}): ${result.error}`,
                                                 result.data
                                         );
                                 }
@@ -64,15 +64,15 @@ export function registerDatabaseToolsWithSentry(server: McpServer, env: Env, pro
 
                                 if (!updated) {
                                         return sentryErrorResponse(
-                                                `No reservation for ${input?.name ?? "unknown guest"} (${input?.mobile ?? "unknown mobile"}) was updated. It may not exist.`,
+                                                `No reservation for ${typedInput?.name ?? "unknown guest"} (${typedInput?.mobile ?? "unknown mobile"}) was updated. It may not exist.`,
                                                 result.data
                                         );
                                 }
 
-                                const changedFields = countChangedFields(input as UpdateReservationInput);
+                                const changedFields = countChangedFields(typedInput);
 
                                 return createSuccessResponse(
-                                        `Updated reservation for ${updated.name ?? input?.name ?? "guest"} (${updated.mobile ?? input?.mobile ?? "mobile"}). ${changedFields} field${changedFields === 1 ? "" : "s"} changed.`,
+                                        `Updated reservation for ${updated.name ?? typedInput?.name ?? "guest"} (${updated.mobile ?? typedInput?.mobile ?? "mobile"}). ${changedFields} field${changedFields === 1 ? "" : "s"} changed.`,
                                         updated
                                 );
                         })
@@ -82,13 +82,14 @@ export function registerDatabaseToolsWithSentry(server: McpServer, env: Env, pro
                 "deleteReservation",
                 "Delete a reservation by providing the guest's name and mobile number.",
                 DeleteReservationParams,
-                async (input) =>
-                        runWithSentrySpan("deleteReservation", props, async () => {
-                                const result = await deleteReservation(env, input as DeleteReservationInput);
+                async (input: unknown) =>
+                        runWithSentrySpan("deleteReservation", async () => {
+                                const typedInput = input as DeleteReservationInput;
+                                const result = await deleteReservation(env, typedInput);
 
                                 if (!result.success) {
                                         return sentryErrorResponse(
-                                                `Failed to delete the reservation for ${input?.name ?? "unknown guest"} (${input?.mobile ?? "unknown mobile"}): ${result.error}`,
+                                                `Failed to delete the reservation for ${typedInput?.name ?? "unknown guest"} (${typedInput?.mobile ?? "unknown mobile"}): ${result.error}`,
                                                 result.data
                                         );
                                 }
@@ -97,39 +98,29 @@ export function registerDatabaseToolsWithSentry(server: McpServer, env: Env, pro
 
                                 if (!deleted) {
                                         return sentryErrorResponse(
-                                                `No reservation for ${input?.name ?? "unknown guest"} (${input?.mobile ?? "unknown mobile"}) was deleted. It may not exist.`,
+                                                `No reservation for ${typedInput?.name ?? "unknown guest"} (${typedInput?.mobile ?? "unknown mobile"}) was deleted. It may not exist.`,
                                                 result.data
                                         );
                                 }
 
                                 return createSuccessResponse(
-                                        `Deleted reservation for ${deleted.name ?? input?.name ?? "guest"} (${deleted.mobile ?? input?.mobile ?? "mobile"}).`,
+                                        `Deleted reservation for ${deleted.name ?? typedInput?.name ?? "guest"} (${deleted.mobile ?? typedInput?.mobile ?? "mobile"}).`,
                                         deleted
                                 );
                         })
         );
 }
 
-async function runWithSentrySpan(
-        toolName: string,
-        props: Props,
-        handler: () => Promise<McpResponse>
-) {
+async function runWithSentrySpan(toolName: string, handler: () => Promise<McpResponse>) {
         return Sentry.startNewTrace(async () => {
                 return Sentry.startSpan(
                         {
                                 name: `mcp.tool/${toolName}`,
                                 attributes: {
                                         "mcp.tool.name": toolName,
-                                        "mcp.user.login": props.login,
                                 },
                         },
                         async (span) => {
-                                Sentry.setUser({
-                                        username: props.login,
-                                        email: props.email,
-                                });
-
                                 try {
                                         const response = await handler();
                                         return response;

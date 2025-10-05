@@ -1,257 +1,141 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { registerDatabaseTools } from '../../../src/tools/database-tools'
+import type {
+  CreateReservationInput,
+  DeleteReservationInput,
+  UpdateReservationInput,
+} from '../../../src/types'
 
-// Mock the database modules
-const mockDbInstance = {
-  unsafe: vi.fn(),
-  end: vi.fn(),
+type RegisteredTool = {
+  description: string
+  handler: (input: unknown) => Promise<any>
 }
 
-vi.mock('../../../src/database/connection', () => ({
-  getDb: vi.fn(() => mockDbInstance),
-}))
+class TestServer {
+  public tools = new Map<string, RegisteredTool>()
 
-vi.mock('../../../src/database/utils', () => ({
-  withDatabase: vi.fn(async (url: string, operation: any) => {
-    return await operation(mockDbInstance)
-  }),
-}))
+  tool(name: string, description: string, _schema: unknown, handler: RegisteredTool['handler']) {
+    this.tools.set(name, { description, handler })
+  }
+}
 
-// Now import the modules
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { registerDatabaseTools } from '../../../src/tools/database-tools'
-import { mockProps, mockPrivilegedProps } from '../../fixtures/auth.fixtures'
-import { mockEnv } from '../../mocks/oauth.mock'
-import { mockTableColumns, mockQueryResult } from '../../fixtures/database.fixtures'
+const env = {
+  SUPABASE_URL: 'https://example.supabase.co',
+  SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+}
 
-describe('Database Tools', () => {
-  let mockServer: McpServer
-  
+describe('registerDatabaseTools', () => {
+  let server: TestServer
+
   beforeEach(() => {
-    vi.clearAllMocks()
-    mockServer = new McpServer({ name: 'test', version: '1.0.0' })
-    
-    // Setup database mocks
-    mockDbInstance.unsafe.mockImplementation((query: string) => {
-      if (query.includes('information_schema.columns')) {
-        return Promise.resolve(mockTableColumns)
-      }
-      if (query.includes('SELECT')) {
-        return Promise.resolve(mockQueryResult)
-      }
-      if (query.includes('INSERT') || query.includes('UPDATE') || query.includes('DELETE')) {
-        return Promise.resolve([{ affectedRows: 1 }])
-      }
-      return Promise.resolve([])
-    })
+    server = new TestServer()
+    vi.restoreAllMocks()
+    global.fetch = vi.fn()
   })
 
-  describe('registerDatabaseTools', () => {
-    it('should register listTables and queryDatabase for regular users', () => {
-      const toolSpy = vi.spyOn(mockServer, 'tool')
-      
-      registerDatabaseTools(mockServer, mockEnv as any, mockProps)
-      
-      expect(toolSpy).toHaveBeenCalledWith(
-        'listTables',
-        expect.any(String),
-        expect.any(Object),
-        expect.any(Function)
-      )
-      expect(toolSpy).toHaveBeenCalledWith(
-        'queryDatabase',
-        expect.any(String),
-        expect.any(Object),
-        expect.any(Function)
-      )
-      expect(toolSpy).toHaveBeenCalledTimes(2)
-    })
+  function getHandler(name: string) {
+    const tool = server.tools.get(name)
+    if (!tool) throw new Error(`Tool ${name} not registered`)
+    return tool.handler
+  }
 
-    it('should register all tools for privileged users', () => {
-      const toolSpy = vi.spyOn(mockServer, 'tool')
-      
-      registerDatabaseTools(mockServer, mockEnv as any, mockPrivilegedProps)
-      
-      expect(toolSpy).toHaveBeenCalledWith(
-        'listTables',
-        expect.any(String),
-        expect.any(Object),
-        expect.any(Function)
-      )
-      expect(toolSpy).toHaveBeenCalledWith(
-        'queryDatabase',
-        expect.any(String),
-        expect.any(Object),
-        expect.any(Function)
-      )
-      expect(toolSpy).toHaveBeenCalledWith(
-        'executeDatabase',
-        expect.any(String),
-        expect.any(Object),
-        expect.any(Function)
-      )
-      expect(toolSpy).toHaveBeenCalledTimes(3)
-    })
+  it('registers the reservation tools', () => {
+    registerDatabaseTools(server as any, env as any)
+
+    expect(Array.from(server.tools.keys())).toEqual([
+      'createReservation',
+      'updateReservation',
+      'deleteReservation',
+    ])
   })
 
-  describe('listTables tool', () => {
-    it('should return table schema successfully', async () => {
-      const toolSpy = vi.spyOn(mockServer, 'tool')
-      registerDatabaseTools(mockServer, mockEnv as any, mockProps)
-      
-      // Get the registered tool handler
-      const toolCall = toolSpy.mock.calls.find(call => call[0] === 'listTables')
-      const handler = toolCall![3] as Function
-      
-      const result = await handler({})
-      
-      expect(result.content).toBeDefined()
-      expect(result.content[0].type).toBe('text')
-      expect(result.content[0].text).toContain('Database Tables and Schema')
-      expect(result.content[0].text).toContain('users')
-      expect(result.content[0].text).toContain('posts')
-    })
+  it('creates reservations successfully', async () => {
+    registerDatabaseTools(server as any, env as any)
 
-    it('should handle database errors', async () => {
-      const toolSpy = vi.spyOn(mockServer, 'tool')
-      mockDbInstance.unsafe.mockRejectedValue(new Error('Database connection failed'))
-      registerDatabaseTools(mockServer, mockEnv as any, mockProps)
-      
-      const toolCall = toolSpy.mock.calls.find(call => call[0] === 'listTables')
-      const handler = toolCall![3] as Function
-      
-      const result = await handler({})
-      
-      expect(result.content[0].isError).toBe(true)
-      expect(result.content[0].text).toContain('Error')
-    })
+    const mockResponse = {
+      ok: true,
+      text: vi.fn().mockResolvedValue(
+        JSON.stringify([
+          {
+            id: 1,
+            name: 'Ada Lovelace',
+            mobile: '+1234567890',
+            nb_people: 4,
+            date: '2025-05-01',
+            time: '19:00',
+          },
+        ]),
+      ),
+    }
+
+    vi.mocked(global.fetch).mockResolvedValue(mockResponse as unknown as Response)
+
+    const handler = getHandler('createReservation')
+    const payload: CreateReservationInput = {
+      mobile: '+1234567890',
+      name: 'Ada Lovelace',
+      nb_people: 4,
+      date: '2025-05-01',
+      time: '19:00',
+    }
+
+    const result = await handler(payload)
+
+    expect(result.content[0].isError).toBeFalsy()
+    expect(result.content[0].text).toContain('Created reservation for Ada Lovelace')
+    expect(vi.mocked(global.fetch)).toHaveBeenCalledTimes(1)
+
+    const [url, init] = vi.mocked(global.fetch).mock.calls[0]
+    expect(url.toString()).toBe('https://example.supabase.co/rest/v1/reservations')
+    expect(init).toMatchObject({ method: 'POST' })
   })
 
-  describe('queryDatabase tool', () => {
-    it('should execute SELECT queries successfully', async () => {
-      const toolSpy = vi.spyOn(mockServer, 'tool')
-      registerDatabaseTools(mockServer, mockEnv as any, mockProps)
-      
-      const toolCall = toolSpy.mock.calls.find(call => call[0] === 'queryDatabase')
-      const handler = toolCall![3] as Function
-      
-      const result = await handler({ sql: 'SELECT * FROM users' })
-      
-      expect(result.content[0].type).toBe('text')
-      expect(result.content[0].text).toContain('Query Results')
-      expect(result.content[0].text).toContain('SELECT * FROM users')
-    })
+  it('returns detailed errors when updates fail', async () => {
+    registerDatabaseTools(server as any, env as any)
 
-    it('should reject write operations', async () => {
-      const toolSpy = vi.spyOn(mockServer, 'tool')
-      registerDatabaseTools(mockServer, mockEnv as any, mockProps)
-      
-      const toolCall = toolSpy.mock.calls.find(call => call[0] === 'queryDatabase')
-      const handler = toolCall![3] as Function
-      
-      const result = await handler({ sql: 'INSERT INTO users VALUES (1, \'test\')' })
-      
-      expect(result.content[0].isError).toBe(true)
-      expect(result.content[0].text).toContain('Write operations are not allowed')
-    })
+    const mockResponse = {
+      ok: false,
+      status: 400,
+      text: vi.fn().mockResolvedValue(
+        JSON.stringify({ message: 'duplicate key value violates unique constraint' })
+      ),
+    }
 
-    it('should reject invalid SQL', async () => {
-      const toolSpy = vi.spyOn(mockServer, 'tool')
-      registerDatabaseTools(mockServer, mockEnv as any, mockProps)
-      
-      const toolCall = toolSpy.mock.calls.find(call => call[0] === 'queryDatabase')
-      const handler = toolCall![3] as Function
-      
-      const result = await handler({ sql: 'SELECT * FROM users; DROP TABLE users' })
-      
-      expect(result.content[0].isError).toBe(true)
-      expect(result.content[0].text).toContain('Invalid SQL query')
-    })
+    vi.mocked(global.fetch).mockResolvedValue(mockResponse as unknown as Response)
 
-    it('should handle database errors', async () => {
-      const toolSpy = vi.spyOn(mockServer, 'tool')
-      mockDbInstance.unsafe.mockRejectedValue(new Error('Database connection failed'))
-      registerDatabaseTools(mockServer, mockEnv as any, mockProps)
-      
-      const toolCall = toolSpy.mock.calls.find(call => call[0] === 'queryDatabase')
-      const handler = toolCall![3] as Function
-      
-      const result = await handler({ sql: 'SELECT * FROM users' })
-      
-      expect(result.content[0].isError).toBe(true)
-      expect(result.content[0].text).toContain('Database query error')
-    })
+    const handler = getHandler('updateReservation')
+    const payload: UpdateReservationInput = {
+      mobile: '+1234567890',
+      name: 'Ada Lovelace',
+      nb_people: 6,
+    }
+
+    const result = await handler(payload)
+
+    expect(result.content[0].isError).toBe(true)
+    expect(result.content[0].text).toContain('Failed to update the reservation')
+    expect(result.content[0].text).toContain('duplicate key value')
   })
 
-  describe('executeDatabase tool', () => {
-    it('should only be available to privileged users', async () => {
-      // Regular user should not get executeDatabase
-      const toolSpy1 = vi.spyOn(mockServer, 'tool')
-      registerDatabaseTools(mockServer, mockEnv as any, mockProps)
-      
-      const executeToolCall = toolSpy1.mock.calls.find(call => call[0] === 'executeDatabase')
-      expect(executeToolCall).toBeUndefined()
-      
-      // Privileged user should get executeDatabase
-      const mockServer2 = new McpServer({ name: 'test2', version: '1.0.0' })
-      const toolSpy2 = vi.spyOn(mockServer2, 'tool')
-      registerDatabaseTools(mockServer2, mockEnv as any, mockPrivilegedProps)
-      
-      const privilegedExecuteToolCall = toolSpy2.mock.calls.find(call => call[0] === 'executeDatabase')
-      expect(privilegedExecuteToolCall).toBeDefined()
-    })
+  it('reports when no reservation is deleted', async () => {
+    registerDatabaseTools(server as any, env as any)
 
-    it('should execute write operations for privileged users', async () => {
-      const toolSpy = vi.spyOn(mockServer, 'tool')
-      registerDatabaseTools(mockServer, mockEnv as any, mockPrivilegedProps)
-      
-      const toolCall = toolSpy.mock.calls.find(call => call[0] === 'executeDatabase')
-      const handler = toolCall![3] as Function
-      
-      const result = await handler({ sql: 'INSERT INTO users VALUES (1, \'test\')' })
-      
-      expect(result.content[0].type).toBe('text')
-      expect(result.content[0].text).toContain('Write Operation Executed Successfully')
-      expect(result.content[0].text).toContain('coleam00')
-    })
+    const mockResponse = {
+      ok: true,
+      text: vi.fn().mockResolvedValue(JSON.stringify([])),
+    }
 
-    it('should execute read operations for privileged users', async () => {
-      const toolSpy = vi.spyOn(mockServer, 'tool')
-      registerDatabaseTools(mockServer, mockEnv as any, mockPrivilegedProps)
-      
-      const toolCall = toolSpy.mock.calls.find(call => call[0] === 'executeDatabase')
-      const handler = toolCall![3] as Function
-      
-      const result = await handler({ sql: 'SELECT * FROM users' })
-      
-      expect(result.content[0].type).toBe('text')
-      expect(result.content[0].text).toContain('Read Operation Executed Successfully')
-    })
+    vi.mocked(global.fetch).mockResolvedValue(mockResponse as unknown as Response)
 
-    it('should reject invalid SQL', async () => {
-      const toolSpy = vi.spyOn(mockServer, 'tool')
-      registerDatabaseTools(mockServer, mockEnv as any, mockPrivilegedProps)
-      
-      const toolCall = toolSpy.mock.calls.find(call => call[0] === 'executeDatabase')
-      const handler = toolCall![3] as Function
-      
-      const result = await handler({ sql: 'SELECT * FROM users; DROP TABLE users' })
-      
-      expect(result.content[0].isError).toBe(true)
-      expect(result.content[0].text).toContain('Invalid SQL statement')
-    })
+    const handler = getHandler('deleteReservation')
+    const payload: DeleteReservationInput = {
+      mobile: '+1234567890',
+      name: 'Ada Lovelace',
+    }
 
-    it('should handle database errors', async () => {
-      const toolSpy = vi.spyOn(mockServer, 'tool')
-      mockDbInstance.unsafe.mockRejectedValue(new Error('Database connection failed'))
-      registerDatabaseTools(mockServer, mockEnv as any, mockPrivilegedProps)
-      
-      const toolCall = toolSpy.mock.calls.find(call => call[0] === 'executeDatabase')
-      const handler = toolCall![3] as Function
-      
-      const result = await handler({ sql: 'INSERT INTO users VALUES (1, \'test\')' })
-      
-      expect(result.content[0].isError).toBe(true)
-      expect(result.content[0].text).toContain('Database execution error')
-    })
+    const result = await handler(payload)
+
+    expect(result.content[0].isError).toBe(true)
+    expect(result.content[0].text).toContain('No reservation for Ada Lovelace')
   })
 })
