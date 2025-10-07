@@ -1,9 +1,11 @@
 import {
         CreateReservationSchema,
         DeleteReservationSchema,
+        GetReservationSchema,
         UpdateReservationSchema,
         type CreateReservationInput,
         type DeleteReservationInput,
+        type GetReservationInput,
         type UpdateReservationInput,
         type DatabaseOperationResult,
 } from "../types";
@@ -174,4 +176,29 @@ export async function deleteReservation(
                         prefer: ["return=representation"],
                 }
         );
+}
+
+export async function getReservation(
+        env: Env,
+        payload: GetReservationInput
+): Promise<DatabaseOperationResult<any[]>> {
+        const parsedPayload = GetReservationSchema.parse(payload);
+        const filters = [
+                `mobile=eq.${encodeURIComponent(parsedPayload.mobile)}`,
+                `name=eq.${encodeURIComponent(parsedPayload.name)}`,
+        ];
+
+        if (parsedPayload.date) {
+                filters.push(`date=eq.${encodeURIComponent(parsedPayload.date)}`);
+        }
+
+        if (parsedPayload.time) {
+                filters.push(`time=eq.${encodeURIComponent(parsedPayload.time)}`);
+        }
+
+        const query = [`select=*`, ...filters].join("&");
+
+        return supabaseRequest<any[]>(env, `${RESERVATIONS_ENDPOINT}?${query}`, {
+                method: "GET",
+        });
 }

@@ -2,14 +2,21 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
         CreateReservationParams,
         DeleteReservationParams,
+        GetReservationParams,
         UpdateReservationParams,
         createErrorResponse,
         createSuccessResponse,
         type CreateReservationInput,
         type DeleteReservationInput,
+        type GetReservationInput,
         type UpdateReservationInput,
 } from "../types";
-import { createReservation, deleteReservation, updateReservation } from "./reservations-service";
+import {
+        createReservation,
+        deleteReservation,
+        getReservation,
+        updateReservation,
+} from "./reservations-service";
 
 export type DatabaseToolsOptions = Record<string, never>;
 
@@ -43,6 +50,54 @@ export function registerDatabaseTools(
                         return createSuccessResponse(
                                 `Created reservation for ${created.name ?? "guest"} on ${created.date ?? "unknown date"} at ${created.time ?? "unknown time"}.`,
                                 created
+                        );
+                }
+        );
+
+        server.tool(
+                "getReservation",
+                "Look up a reservation in Supabase by guest name and mobile number, optionally filtered by date and time.",
+                GetReservationParams,
+                async (input: unknown) => {
+                        const typedInput = input as GetReservationInput;
+                        const result = await getReservation(env, typedInput);
+
+                        if (!result.success) {
+                                return createErrorResponse(
+                                        `Failed to get the reservation for ${typedInput?.name ?? "unknown guest"} (${typedInput?.mobile ?? "unknown mobile"}): ${result.error}`,
+                                        result.data
+                                );
+                        }
+
+                        const reservations = Array.isArray(result.data)
+                                ? result.data
+                                : result.data
+                                  ? [result.data]
+                                  : [];
+
+                        if (reservations.length === 0) {
+                                const qualifiers: string[] = [];
+                                if (typedInput?.date) {
+                                        qualifiers.push(`on ${typedInput.date}`);
+                                }
+
+                                if (typedInput?.time) {
+                                        qualifiers.push(`at ${typedInput.time}`);
+                                }
+
+                                const qualifierText = qualifiers.length ? ` ${qualifiers.join(" ")}` : "";
+
+                                return createErrorResponse(
+                                        `No reservation for ${typedInput?.name ?? "unknown guest"} (${typedInput?.mobile ?? "unknown mobile"})${qualifierText}.`,
+                                        result.data
+                                );
+                        }
+
+                        const summary = reservations.length === 1 ? "reservation" : `${reservations.length} reservations`;
+
+                        return createSuccessResponse(
+                                `Found ${summary} for ${reservations[0]?.name ?? typedInput?.name ?? "guest"} (${reservations[0]?.mobile ?? typedInput?.mobile ?? "mobile"}).`,
+                                reservations.length === 1 ? reservations[0] : reservations
                         );
                 }
         );

@@ -100,9 +100,29 @@ export const DeleteReservationSchema = z.object({
 
 export const DeleteReservationParams = DeleteReservationSchema.shape;
 
+export const GetReservationSchema = z.object({
+  mobile: mobileField.describe(
+    "Mobile number stored on the reservation you want to find."
+  ),
+  name: nameField.describe(
+    "Guest name stored on the reservation you want to find."
+  ),
+  date: dateField
+    .optional()
+    .describe(
+      "Specific reservation date to filter by (optional, YYYY-MM-DD)."
+    ),
+  time: timeField
+    .optional()
+    .describe("Specific reservation time to filter by (optional, HH:MM)."),
+});
+
+export const GetReservationParams = GetReservationSchema.shape;
+
 export type CreateReservationInput = z.infer<typeof CreateReservationSchema>;
 export type UpdateReservationInput = z.infer<typeof UpdateReservationSchema>;
 export type DeleteReservationInput = z.infer<typeof DeleteReservationSchema>;
+export type GetReservationInput = z.infer<typeof GetReservationSchema>;
 
 // MCP response types
 export interface McpTextContent {

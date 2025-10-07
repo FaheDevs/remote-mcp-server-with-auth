@@ -3,6 +3,7 @@ import { registerDatabaseTools } from '../../../src/tools/database-tools'
 import type {
   CreateReservationInput,
   DeleteReservationInput,
+  GetReservationInput,
   UpdateReservationInput,
 } from '../../../src/types'
 
@@ -44,9 +45,99 @@ describe('registerDatabaseTools', () => {
 
     expect(Array.from(server.tools.keys())).toEqual([
       'createReservation',
+      'getReservation',
       'updateReservation',
       'deleteReservation',
     ])
+  })
+
+  it('retrieves reservations successfully', async () => {
+    registerDatabaseTools(server as any, env as any)
+
+    const mockResponse = {
+      ok: true,
+      text: vi.fn().mockResolvedValue(
+        JSON.stringify([
+          {
+            id: 42,
+            name: 'Ada Lovelace',
+            mobile: '+1234567890',
+            date: '2025-05-01',
+            time: '19:00',
+            nb_people: 4,
+          },
+        ])
+      ),
+    }
+
+    vi.mocked(global.fetch).mockResolvedValue(mockResponse as unknown as Response)
+
+    const handler = getHandler('getReservation')
+    const payload: GetReservationInput = {
+      mobile: '+1234567890',
+      name: 'Ada Lovelace',
+      date: '2025-05-01',
+    }
+
+    const result = await handler(payload)
+
+    expect(result.content[0].isError).toBeFalsy()
+    expect(result.content[0].text).toContain('Found reservation for Ada Lovelace')
+
+    const [url, init] = vi.mocked(global.fetch).mock.calls[0]
+    expect(url.toString()).toContain('select=*')
+    expect(url.toString()).toContain('date=eq.2025-05-01')
+    expect(init).toMatchObject({ method: 'GET' })
+  })
+
+  it('returns errors when reservation lookup fails', async () => {
+    registerDatabaseTools(server as any, env as any)
+
+    const mockResponse = {
+      ok: false,
+      status: 500,
+      text: vi.fn().mockResolvedValue(
+        JSON.stringify({ message: 'service unavailable' })
+      ),
+    }
+
+    vi.mocked(global.fetch).mockResolvedValue(mockResponse as unknown as Response)
+
+    const handler = getHandler('getReservation')
+    const payload: GetReservationInput = {
+      mobile: '+1234567890',
+      name: 'Ada Lovelace',
+    }
+
+    const result = await handler(payload)
+
+    expect(result.content[0].isError).toBe(true)
+    expect(result.content[0].text).toContain('Failed to get the reservation')
+    expect(result.content[0].text).toContain('service unavailable')
+  })
+
+  it('reports when no reservation matches the lookup', async () => {
+    registerDatabaseTools(server as any, env as any)
+
+    const mockResponse = {
+      ok: true,
+      text: vi.fn().mockResolvedValue(JSON.stringify([])),
+    }
+
+    vi.mocked(global.fetch).mockResolvedValue(mockResponse as unknown as Response)
+
+    const handler = getHandler('getReservation')
+    const payload: GetReservationInput = {
+      mobile: '+1234567890',
+      name: 'Ada Lovelace',
+      time: '19:00',
+    }
+
+    const result = await handler(payload)
+
+    expect(result.content[0].isError).toBe(true)
+    expect(result.content[0].text).toContain('No reservation for Ada Lovelace')
+    expect(result.content[0].text).toContain('at 19:00')
   })
 
   it('creates reservations successfully', async () => {
